@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PM Dashboard: Обработка входящих</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        details > summary { list-style: none; cursor: pointer; }
+        details > summary::-webkit-details-marker { display: none; }
+        details[open] .chevron { transform: rotate(180deg); }
+        .chevron { transition: transform 0.15s ease; }
+        .source-quote { border-left: 3px solid #cbd5e1; }
+        .filter-btn.active { box-shadow: inset 0 0 0 2px currentColor; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans p-6">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">Дашборд: Разбор входящих задач</h1>
+            <p class="text-sm text-gray-500 mt-2">Фокус на сроках и типах задач для планирования спринта. Точка отсчета: сообщения получены в понедельник, 12 мая.</p>
+        </header>
+
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-5 mb-8">
+            <h2 class="text-lg font-semibold mb-3">Правило разбора: как выводится приоритет</h2>
+            <p class="text-sm text-gray-600 mb-4">Приоритет выводится из комбинации жесткости дедлайна и цены ошибки (бизнес-риска). Матрица приоритизации разделяет «горящие» фин-блокеры и тяжелые операционные проблемы.</p>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                <div class="border border-red-200 bg-red-50 rounded p-3">
+                    <span class="font-bold text-red-700">P0 · Критикал (Hotfix)</span>
+                    <p class="mt-1 text-gray-600"><strong>Срок:</strong> ASAP / До 24 часов.<br><strong>Риск:</strong> Прямой критический урон: остановка оплат, срыв ключевого B2B-контракта или юридический запрет релиза.</p>
+                </div>
+                <div class="border border-orange-200 bg-orange-50 rounded p-3">
+                    <span class="font-bold text-orange-700">P1 · Высокий (Топ очереди)</span>
+                    <p class="mt-1 text-gray-600"><strong>Срок:</strong> 1–2 дня (ближайшие 48ч).<br><strong>Риск:</strong> Операционный кризис: шторм жалоб, команда саппорта тонет в ручной работе. Блокировки денег нет.</p>
+                </div>
+                <div class="border border-yellow-200 bg-yellow-50 rounded p-3">
+                    <span class="font-bold text-yellow-700">P2 · Средний (Текущий спринт)</span>
+                    <p class="mt-1 text-gray-600"><strong>Срок:</strong> До конца недели / К дате вехи.<br><strong>Риск:</strong> Процессные или маркетинговые вехи (вебинар, онбординг). Снижение конверсий, потеря времени команды.</p>
+                </div>
+                <div class="border border-gray-300 bg-gray-100 rounded p-3">
+                    <span class="font-bold text-gray-700">P3 · Бэклог (План спринта+)</span>
+                    <p class="mt-1 text-gray-600"><strong>Срок:</strong> Со следующей недели и позже.<br><strong>Риск:</strong> Операционные риски отсутствуют. Эволюционные улучшения процессов и сбор продуктовых метрик.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+                <h2 class="text-lg font-semibold mb-4 text-center">Категории задач (Тип работы)</h2>
+                <div class="relative h-64 w-full flex justify-center">
+                    <canvas id="typeChart"></canvas>
+                </div>
+            </div>
+            <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+                <h2 class="text-lg font-semibold mb-4 text-center">Загрузка по дедлайнам</h2>
+                <div class="relative h-64 w-full flex justify-center">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-100 flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+                <h2 class="text-xl font-bold text-gray-800">Структурированный бэклог</h2>
+                <div class="flex items-center gap-2 flex-wrap" id="filterContainer">
+                    <span class="text-xs text-gray-500 mr-1">Фильтр:</span>
+                    <button data-filter="all" class="filter-btn active text-gray-700 text-xs font-semibold px-3 py-1 rounded-full bg-gray-200">Все</button>
+                    <button data-filter="P0" class="filter-btn text-red-700 text-xs font-semibold px-3 py-1 rounded-full bg-red-100">P0</button>
+                    <button data-filter="P1" class="filter-btn text-orange-700 text-xs font-semibold px-3 py-1 rounded-full bg-orange-100">P1</button>
+                    <button data-filter="P2" class="filter-btn text-yellow-700 text-xs font-semibold px-3 py-1 rounded-full bg-yellow-100">P2</button>
+                    <button data-filter="P3" class="filter-btn text-gray-700 text-xs font-semibold px-3 py-1 rounded-full bg-gray-200">P3</button>
+                </div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-left text-sm">
+                    <thead class="uppercase tracking-wider border-b-2 border-gray-200 bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 font-medium text-gray-500 whitespace-nowrap">Канал</th>
+                            <th class="px-6 py-3 font-medium text-gray-500">Сформулированная задача</th>
+                            <th class="px-6 py-3 font-medium text-gray-500 whitespace-nowrap">Приоритет и срок</th>
+                            <th class="px-6 py-3 font-medium text-gray-500">Бизнес-риск</th>
+                            <th class="px-6 py-3 font-medium text-gray-500">Исполнитель</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200" id="taskBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <p class="text-xs text-gray-400 mt-4">Клик по формулировке задачи разворачивает исходное сообщение — так сохраняется связь между решением и первоисточником.</p>
+    </div>
+
+    <script>
+        const tasks = [
+            {
+                id: 1, channel: "Поддержка", channelColor: "text-red-600",
+                original: "После оплаты у части клиентов не уходит письмо с чеком. Саппорт уже второй день отвечает руками. Хорошо бы починить сегодня, а то начнутся жалобы.",
+                task: "[Bug] Починить отправку писем с чеком после оплаты",
+                type: "Баг", priority: "P1", priorityLabel: "P1 (Высокий)",
+                priorityStyle: "bg-orange-100 text-orange-700",
+                deadlineRel: "Сегодня (из текста)", deadlineAbs: "12 мая (Пн)",
+                risk: "Жалобы клиентов, ручной труд саппорта уже 2-й день",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Бэкенд / Интеграции"
+            },
+            {
+                id: 2, channel: "Маркетинг", channelColor: "text-yellow-600",
+                original: "Нужен блок с кейсами на лендинге перед вебинаром 15 мая. Контент маркетинг почти собрал, нужен кто-то, кто это доведет до релиза.",
+                task: "[Feature] Блок с кейсами на лендинге к вебинару",
+                type: "Фича", priority: "P2", priorityLabel: "P2 (Средний)",
+                priorityStyle: "bg-yellow-100 text-yellow-700",
+                deadlineRel: "До вебинара 15 мая", deadlineAbs: "до 14 мая (Ср)",
+                risk: "Падение конверсии вебинара без кейсов на лендинге",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Фронтенд-разработчик"
+            },
+            {
+                id: 3, channel: "Онбординг", channelColor: "text-yellow-600",
+                original: "Ребята, новички опять пишут всем в личку, потому что непонятно, где брать доступы и какие шаги делать в первую неделю. Давайте уже соберем одну нормальную инструкцию и чек-лист до конца недели.",
+                task: "[Process] Инструкция и чек-лист для новичков",
+                type: "Процесс", priority: "P2", priorityLabel: "P2 (Средний)",
+                priorityStyle: "bg-yellow-100 text-yellow-700",
+                deadlineRel: "До конца недели", deadlineAbs: "до 16 мая (Пт)",
+                risk: "Потеря времени команды на повторяющиеся вопросы в личке",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> HR / Ops"
+            },
+            {
+                id: 4, channel: "Мобайл", channelColor: "text-red-600",
+                original: "На айфоне в Safari кнопка «Оплатить» уезжает за экран. С утра это показывали на созвоне. Желательно срочно, потому что это выглядит очень плохо.",
+                task: "[Bug/UI] Починить кнопку «Оплатить» в Safari на iOS",
+                type: "Баг", priority: "P0", priorityLabel: "P0 (Критикал)",
+                priorityStyle: "bg-red-100 text-red-700",
+                deadlineRel: "ASAP (Срочно)", deadlineAbs: "12 мая (Пн)",
+                risk: "Блокировка оплат на iOS — прямая потеря выручки",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Frontend / Mobile"
+            },
+            {
+                id: 5, channel: "Продажи", channelColor: "text-gray-500",
+                original: "Продажи давно просят автоматически собирать NPS после закрытия заказа. Не горит, но в следующем спринте было бы хорошо это наконец сделать.",
+                task: "[Feature] Автосбор NPS после заказа",
+                type: "Фича", priority: "P3", priorityLabel: "P3 (Бэклог)",
+                priorityStyle: "bg-gray-200 text-gray-700",
+                deadlineRel: "Следующий спринт", deadlineAbs: "после 23 мая",
+                risk: "Операционного риска нет — отложенное улучшение",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Продуктовая команда"
+            },
+            {
+                id: 6, channel: "Пилот", channelColor: "text-red-600",
+                original: "Клиент Acme попросил CSV-экспорт по филиалам к пятнице, иначе говорит, что будет сложно продлить пилот. Можете оценить и взять в работу?",
+                task: "[Data] CSV-экспорт по филиалам для Acme",
+                type: "Фича", priority: "P0", priorityLabel: "P0 (Критикал)",
+                priorityStyle: "bg-red-100 text-red-700",
+                deadlineRel: "Критично к ПТ", deadlineAbs: "16 мая (Пт)",
+                risk: "Срыв продления пилота с клиентом Acme — потеря контракта",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Backend / Data"
+            },
+            {
+                id: 7, channel: "Операции", channelColor: "text-gray-500",
+                original: "Мы уже третий раз за неделю обсуждаем одни и те же задачи, потому что статусы разбросаны по Telegram и личкам. Нужен единый weekly update шаблон, можно внедрить на следующей неделе.",
+                task: "[Process] Внедрить шаблон weekly update",
+                type: "Процесс", priority: "P3", priorityLabel: "P3 (Бэклог)",
+                priorityStyle: "bg-gray-200 text-gray-700",
+                deadlineRel: "Следующая неделя", deadlineAbs: "19–23 мая",
+                risk: "Рассинхрон команды, повторные обсуждения одного и того же",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Project Manager"
+            },
+            {
+                id: 8, channel: "Юристы", channelColor: "text-red-600",
+                original: "На сайте до сих пор старая оферта, юристы сегодня напомнили. Нужно обновить файл и ссылку до публикации релиза в среду.",
+                task: "[Compliance] Обновить оферту на сайте",
+                type: "Compliance", priority: "P0", priorityLabel: "P0 (Критикал)",
+                priorityStyle: "bg-red-100 text-red-700",
+                deadlineRel: "До релиза в СР", deadlineAbs: "14 мая (Ср)",
+                risk: "Юридический риск публикации релиза с устаревшей офертой",
+                assignee: "<span class='text-gray-400 italic font-normal'>Не назван →</span> Frontend / Контент"
+            }
+        ];
+
+        // 1. Динамические счетчики для кнопок фильтров
+        const counts = { all: tasks.length, P0: 0, P1: 0, P2: 0, P3: 0 };
+        tasks.forEach(t => {
+            if (counts[t.priority] !== undefined) counts[t.priority]++;
+        });
+        
+        document.querySelector('[data-filter="all"]').innerText = `Все (${counts.all})`;
+        document.querySelector('[data-filter="P0"]').innerText = `P0 (${counts.P0})`;
+        document.querySelector('[data-filter="P1"]').innerText = `P1 (${counts.P1})`;
+        document.querySelector('[data-filter="P2"]').innerText = `P2 (${counts.P2})`;
+        document.querySelector('[data-filter="P3"]').innerText = `P3 (${counts.P3})`;
+
+        // 2. Отрисовка таблицы
+        const tbody = document.getElementById('taskBody');
+        tasks.forEach(t => {
+            const tr = document.createElement('tr');
+            tr.className = 'hover:bg-gray-50 align-top';
+            tr.dataset.priority = t.priority;
+            tr.innerHTML = `
+                <td class="px-6 py-4 font-bold whitespace-nowrap ${t.channelColor}">${t.channel}</td>
+                <td class="px-6 py-4 whitespace-normal">
+                    <details>
+                        <summary class="font-medium flex items-start gap-2">
+                            <svg class="chevron w-4 h-4 mt-0.5 shrink-0 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" /></svg>
+                            <span>${t.task}</span>
+                        </summary>
+                        <p class="source-quote mt-2 pl-3 text-xs text-gray-500 italic">«${t.original}»</p>
+                    </details>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                    <span class="${t.priorityStyle} px-2 py-1 rounded text-xs font-bold">${t.priorityLabel}</span><br>
+                    <span class="text-xs text-gray-500 mt-1 block">${t.deadlineRel} · ${t.deadlineAbs}</span>
+                </td>
+                <td class="px-6 py-4 whitespace-normal text-xs">${t.risk}</td>
+                <td class="px-6 py-4 whitespace-normal text-xs text-gray-700 font-medium">${t.assignee}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // 3. Инициализация пустых графиков
+        const typeChartInstance = new Chart(document.getElementById('typeChart').getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: ["Баги (Тушение пожаров)", "Фичи (Развитие)", "Процессы (Оптимизация)", "Compliance (Юристы)"],
+                datasets: [{ data: [0, 0, 0, 0], backgroundColor: ['#ef4444', '#3b82f6', '#10b981', '#8b5cf6'] }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        const timelineChartInstance = new Chart(document.getElementById('timelineChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: ["Ближайшие 24ч / ASAP", "До конца недели", "В бэклог (След. неделя+)"],
+                datasets: [{ label: 'Количество задач', data: [0, 0, 0], backgroundColor: ['#ef4444', '#f59e0b', '#9ca3af'], borderRadius: 4 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+        });
+
+        // 4. Функция пересчета данных на основе массива
+        function updateCharts(filteredTasks) {
+            const types = { 'Баг': 0, 'Фича': 0, 'Процесс': 0, 'Compliance': 0 };
+            const timeline = { 'today': 0, 'week': 0, 'later': 0 };
+
+            filteredTasks.forEach(t => {
+                if (types[t.type] !== undefined) types[t.type]++;
+                
+                // Распределение по временным корзинам
+                if (t.deadlineAbs.includes('12 мая') || t.deadlineAbs.includes('13 мая')) timeline.today++;
+                else if (t.deadlineAbs.includes('14 мая') || t.deadlineAbs.includes('16 мая')) timeline.week++;
+                else timeline.later++;
+            });
+
+            typeChartInstance.data.datasets[0].data = [types['Баг'], types['Фича'], types['Процесс'], types['Compliance']];
+            typeChartInstance.update();
+
+            timelineChartInstance.data.datasets[0].data = [timeline.today, timeline.week, timeline.later];
+            timelineChartInstance.update();
+        }
+
+        // 5. Логика кнопок фильтрации
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                const f = btn.dataset.filter;
+                
+                document.querySelectorAll('#taskBody tr').forEach(row => {
+                    row.style.display = (f === 'all' || row.dataset.priority === f) ? '' : 'none';
+                });
+
+                const activeTasks = (f === 'all') ? tasks : tasks.filter(t => t.priority === f);
+                updateCharts(activeTasks);
+            });
+        });
+
+        // 6. Первая загрузка
+        updateCharts(tasks);
+    </script>
+</body>
+</html>
