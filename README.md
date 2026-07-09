@@ -1,2 +1,2 @@
 # pm-test-task
-Test task completed by Steven K/
+Test task completed by Steven K
